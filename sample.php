@@ -26,6 +26,7 @@ public $property = 'the value';
 
 /**
  * The constructor
+ * 
  *
  * @param variant $param1 - sample parameter
  * @param bool $param2 - another parameter
@@ -40,8 +41,27 @@ function __construct($param1, $param2, $param3){
 
 /**
  * A method
+ * @category Flowers
  */
 public function method($param1, $param2, $param3)
+{
+
+}
+
+/**
+ * A method
+ * @category Bees
+ */
+public function another_method($param1, $param2, $param3)
+{
+
+}
+/**
+ * A method
+ * @category Flowers
+ * @category Bees
+ */
+public function yet_another_method($param1, $param2, $param3)
 {
 
 }
