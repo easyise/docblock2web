@@ -11,7 +11,7 @@ class docblock2web:
 
     rootTypes = ['file_header', 'class', 'js_function', 'jquery_plugin']
 
-    options = {'asset_order': ['properties', 'methods', 'events'],\
+    options = {'asset_order': ['methods', 'events', 'properties'],\
         'scope_order': ['public', 'static', 'protected', 'private'], \
         'header_level': 2, \
         'display': 'hierarchial', \
@@ -111,7 +111,7 @@ class docblock2web:
         for cat, dbs in self.categories.items():
             dbs = dbs.sort(key=lambda db: ((db.parent.name if hasattr(db, 'parent') and hasattr(db.parent, 'name') else '')+db.name).lower())
 
-    def merge_categories(self, categories, categories1):
+    def merge_categories(categories, categories1):
         """ Recursively merge categories dictionary and sort list by class name + function name. The ``merge_dct`` is merged into ``dct``.
             :param categories: dict onto which the merge is executed
             :param categories1: dct merged into dct
@@ -168,7 +168,10 @@ class docblock2web:
         return md
 
     # returns categories markdown
-    def cats(self, categories = {}, output='yaml'):
+    def cats(self, categories = None, output = None):
+
+        categories = self.categories if categories is None else categories
+        output = 'yaml' if output is None else output
 
         str = ''
 
@@ -189,7 +192,7 @@ class docblock2web:
                 if db.type not in docblock2web.rootTypes or db.type=='file_header':
                     continue
 
-                categories = self.merge_categories( categories, db.assets['categories'] )
+                categories = docblock2web.merge_categories( categories, db.assets['categories'] )
 
         cats = list(categories.keys())
 
@@ -293,7 +296,7 @@ class docBlock:
             self.name = mClass.group(1)
             return
 
-        mFunction = re.search(r'function\s((\w+)\s*\([^)]*\))', self.rawSubject, re.IGNORECASE)
+        mFunction = re.search(r'function\s((\w+)\s*\(.*\))', self.rawSubject, re.IGNORECASE)
         if mFunction:
             self.type = 'function'
             self.subject = mFunction.group(1)
@@ -363,8 +366,8 @@ class docBlock:
 
     def brief_name(self, options={}):
         
-        return ('$' if self.language=='PHP' and self.type=='variable' else '')+\
-                (self.parent.name+('::' if self.language=='PHP' else '.') if self.parent and 'showParent' in options and options['showParent'] else '')+\
+        return  (self.parent.name+('::' if self.language=='PHP' else '.') if self.parent and 'showParent' in options and options['showParent'] else '')+\
+                ('$' if self.language=='PHP' and self.type=='variable' else '')+\
                 self.name+\
                 ('()' if self.type=='function' else '')
 
@@ -390,7 +393,7 @@ class docBlock:
             header = ('#' * (options['header_level']+(1 if self.scope else 0)) + ' ') \
                 + ('<a name="%s"></a>' % self.anchor() if self.name else '') \
                 + (self.scope+' ' if self.scope else '') \
-                + self.type +' '+self.subject
+                + self.type +' __'+self.subject+'__'
             header += "\n\n"
 
         strMD = header
