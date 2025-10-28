@@ -1,9 +1,10 @@
 import re
-import os
+import os, io
+from pathlib import Path
 
-class docblock2web:
+class DocBlock2Web:
 
-    docBlocks = []
+    dockblocks = []
     fileHierarchy = []
     categories = {}
     sourceFile = ''
@@ -55,19 +56,20 @@ class docblock2web:
     def __init__(self, sourceFile, sourceFileName='', options={}):
         
         self.sourceFile = sourceFile
-        self.sourceFileName = sourceFileName
+        self.sourceFileName = sourceFileName if sourceFileName else \
+            sourceFile.name if isinstance(sourceFile, io.TextIOWrapper) else None
 
         lines = sourceFile.readlines()
-        self.docBlocks = []
+        self.dockblocks = []
         self.categories = {}
-        self.options = docblock2web.options.copy()
+        self.options = DocBlock2Web.options.copy()
         self.options.update(options)
 
         # getting docblock coordinates
         lineNo = 0
         for line in lines:
-            mStart = docBlock.reStart.search(line)
-            mEnd = docBlock.reEnd.search(line)
+            mStart = DocBlock.reStart.search(line)
+            mEnd = DocBlock.reEnd.search(line)
             
             if mStart:
                 #print("DocBlock starts at line {}:{}".format(lineNo+1, mStart.end()))
@@ -79,28 +81,31 @@ class docblock2web:
                 db['contents'] = ''
                 for i in range(db['begin'][0], db['end'][0]):
                     dbLine = lines[i]
-                    lineProcessed = re.sub(docBlock.reEnd, '', \
-                                                    re.sub(docBlock.reStart, '',\
+                    lineProcessed = re.sub(DocBlock.reEnd, '', \
+                                                    re.sub(DocBlock.reStart, '',\
                                                            dbLine)
                                                     )
-                    db['contents'] +=  re.sub(docBlock.reLineStart, '', lineProcessed )
+                    db['contents'] +=  re.sub(DocBlock.reLineStart, '', lineProcessed )
                 db['contents'] = db['contents'].strip()
                 if db['contents'] !='' and not re.search("\@ignore", db['contents']):
                     db['subject'] = lines[lineNo+1].strip()
-                    if db['subject'] != '' or len(self.docBlocks)==0:
-                        self.docBlocks.append( docBlock( **db ) )
+                    if db['subject'] != '' or len(self.dockblocks)==0:
+                        o_db = DocBlock( **db, 
+                                        sourceFile=sourceFile, 
+                                        sourceFileName=self.sourceFileName )
+                        self.dockblocks.append( o_db )
                 
             lineNo += 1
 
-        for i, db in enumerate(self.docBlocks):
+        for i, db in enumerate(self.dockblocks):
             if i==0 and not db.type:
                 db.type='file_header'
                 continue
             if db.type=='class':
-                db.collectClassAssets(i, self.docBlocks)
+                db.collectClassAssets(i, self.dockblocks)
                 continue
         
-        for i, db in enumerate(self.docBlocks):
+        for i, db in enumerate(self.dockblocks):
             if 'category' in db.tokens and hasattr(db, 'name'):
                 for cat in db.tokens['category']:
                     cat = cat.strip()
@@ -137,9 +142,9 @@ class docblock2web:
     def md(self):
 
         md = ''
-        for i, db in enumerate(self.docBlocks):
+        for i, db in enumerate(self.dockblocks):
             
-            if self.options['display']=='hierarchial' and db.type not in docblock2web.rootTypes:
+            if self.options['display']=='hierarchial' and db.type not in DocBlock2Web.rootTypes:
                 continue
 
             md += db.md(self.options)
@@ -156,9 +161,9 @@ class docblock2web:
         options = self.options.copy()
         options['output'] = output
             
-        for i, db in enumerate(self.docBlocks):
+        for i, db in enumerate(self.dockblocks):
             
-            if db.type not in docblock2web.rootTypes or db.type=='file_header':
+            if db.type not in DocBlock2Web.rootTypes or db.type=='file_header':
                 continue
 
             md += db.toc(options)
@@ -173,7 +178,7 @@ class docblock2web:
         categories = self.categories if categories is None else categories
         output = 'yaml' if output is None else output
 
-        str = ''
+        str_ = ''
 
         formatters = {'yaml':[ (' '*4)+'- title: \"{}\"\n'+(' '*6)+'folders:\n\n',\
                 (' '*6)+'- title: \"{}\"\n'+(' '*8)+'url: \"{}\"\n'+(' '*8)+'folders:\n\n'\
@@ -187,12 +192,12 @@ class docblock2web:
 
         if len(categories.keys())==0:
             
-            for i, db in enumerate(self.docBlocks):
+            for i, db in enumerate(self.dockblocks):
                 
-                if db.type not in docblock2web.rootTypes or db.type=='file_header':
+                if db.type not in DocBlock2Web.rootTypes or db.type=='file_header':
                     continue
 
-                categories = docblock2web.merge_categories( categories, db.assets['categories'] )
+                categories = DocBlock2Web.merge_categories( categories, db.assets['categories'] )
 
         cats = list(categories.keys())
 
@@ -210,18 +215,18 @@ class docblock2web:
                 break
 
         for i, cat in enumerate(cats):
-            str += formatter[0].format(cat)
+            str_ += formatter[0].format(cat)
             for j, db in enumerate(categories[cat]):
-                str += formatter[1].format( db.brief_name({'showParent': flagMultipleClasses}), '#'+db.anchor() )
+                str_ += formatter[1].format( db.brief_name({'showParent': flagMultipleClasses}), '#'+db.anchor() )
 
-        return str
-
-
+        return str_
 
 
 
 
-class docBlock:
+
+
+class DocBlock:
 
     lineNoStart = None
     lineNoEnd = None
@@ -239,13 +244,16 @@ class docBlock:
 
     reDollar = re.compile(r'(\$)([\w]+)')
 
-    def __init__(self, begin, end, subject, contents):
+    def __init__(self, begin, end, subject, contents, **kwargs):
 
         self.lineNoStart = begin
         self.lienNoEnd = end
 
         self.rawSubject = subject
         self.rawContents = contents
+
+        self.sourceFile = kwargs.get('sourceFile', None)  
+        self.sourceFileName = kwargs.get('sourceFileName', '')
 
         self.subject = ''
         self.type = None
@@ -273,8 +281,7 @@ class docBlock:
         activeToken = 'description'
         activeTokenContent = ''
         
-        for i in range(0,len(aContents)):
-            curString = aContents[i]
+        for i, curString in enumerate(aContents):
             if re.search(reToken, curString, re.IGNORECASE):
                 # finish previous active token and start next
                 if activeToken:
@@ -319,17 +326,17 @@ class docBlock:
                 else ('private' if re.search('private', self.rawSubject, re.IGNORECASE) \
                     else 'public'))
 
-    def collectClassAssets(self, selfIndex, allDocBlocks):
+    def collectClassAssets(self, selfIndex, alldockblocks):
 
         self.assets['properties'] = {'public': [], 'static': [], 'private': [], 'protected': []}
         self.assets['methods'] = {'public': [], 'static': [], 'private': [], 'protected': []}
         self.assets['events'] = []
         self.assets['categories'] = {}
 
-        for i in range(selfIndex+1, len(allDocBlocks)):
-            db = allDocBlocks[i]
+        for i in range(selfIndex+1, len(alldockblocks)):
+            db = alldockblocks[i]
             
-            if db.type in docblock2web.rootTypes:
+            if db.type in DocBlock2Web.rootTypes:
                 break;
 
             db.updateScope();
@@ -404,7 +411,13 @@ class docBlock:
         tags = ''
         for tag in ts:
             if tag not in ['param', 'return', 'example', 'description']:
-                tags += '__'+options['tags'][tag]+'__'+": "+lst2str(self.tokens[tag])+"  \n"
+                if tag in options['tags'] and tag in self.tokens:
+                    tags += '__'+options['tags'][tag]+'__'+": "+lst2str(self.tokens[tag])+"  \n"
+                else:
+                    raise DocBlock2WebException("Tag '%s' is not supported %s" % (tag, 
+                                                                                  "(file: %s:%d)" % (self.sourceFileName,
+                                                                                                     self.lineNoStart[0]) if self.sourceFileName else '') )
+                
         tags += '\n' if len(tags)>0 else ''
 
         strMD += tags
@@ -427,7 +440,7 @@ class docBlock:
 
 
 
-        if options['display']=='hierarchial' and self.type in docblock2web.rootTypes and self.type!='file_header':
+        if options['display']=='hierarchial' and self.type in DocBlock2Web.rootTypes and self.type!='file_header':
             for asset_type in options['asset_order']:
                 for scope in options['scope_order']:
                     assets = self.assets[asset_type] if (type(self.assets[asset_type]) is list) \
@@ -455,27 +468,30 @@ class docBlock:
 
         formatter = formatters[options['output']]
 
-        str = formatter[0].format(options['translations'][self.type]+' '+self.name+":", '#'+self.anchor() )
-        if self.type in docblock2web.rootTypes and self.type!='file_header':
+        str_ = formatter[0].format(options['translations'][self.type]+' '+self.name+":", '#'+self.anchor() )
+        if self.type in DocBlock2Web.rootTypes and self.type!='file_header':
             for asset_type in options['asset_order']:
                 for scope in options['scope_order']:
                     assets = self.assets[asset_type] if (type(self.assets[asset_type]) is list) \
                         else (self.assets[asset_type][scope] if type(self.assets[asset_type][scope]) is list \
                             else [])
                     if len(assets)>0:
-                        str += formatter[1].format( (scope+' ' if scope else '')+asset_type+":" )
+                        str_ += formatter[1].format( (scope+' ' if scope else '')+asset_type+":" )
                         for dbAsset in assets:
-                            str += formatter[2].format( dbAsset.brief_name(options), '#'+dbAsset.anchor() )
+                            str_ += formatter[2].format( dbAsset.brief_name(options), '#'+dbAsset.anchor() )
                             """
                             if options['output']=='md':
-                                str += "\t- "+dbAsset.href()
+                                str_ += "\t- "+dbAsset.href()
                             else: 
-                                str += "    -title: %s\n" % dbAsset.brief_name(options)
-                                str += "     href: #%s\n" % dbAsset.anchor()
+                                str_ += "    -title: %s\n" % dbAsset.brief_name(options)
+                                str_ += "     href: #%s\n" % dbAsset.anchor()
                                 """
-            str += "\n"
+            str_ += "\n"
 
-        return str
+        return str_
+    
+class DocBlock2WebException(Exception):
+    pass
 
 
 
