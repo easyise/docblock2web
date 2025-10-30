@@ -12,8 +12,9 @@ class DocBlock2Web:
 
     rootTypes = ['file_header', 'class', 'js_function', 'jquery_plugin']
 
-    options = {'asset_order': ['methods', 'events', 'properties'],\
+    options = {'asset_order': ['properties', 'methods', 'events'],\
         'scope_order': ['public', 'static', 'protected', 'private'], \
+        'tag_order': ['description', 'param', 'uses', 'return', 'example', 'see', 'category'], 
         'header_level': 2, \
         'display': 'hierarchial', \
         'escapeDollar': False, \
@@ -91,6 +92,7 @@ class DocBlock2Web:
                     db['subject'] = lines[lineNo+1].strip()
                     if db['subject'] != '' or len(self.dockblocks)==0:
                         o_db = DocBlock( **db, 
+                                        lines=lines,
                                         sourceFile=sourceFile, 
                                         sourceFileName=self.sourceFileName )
                         self.dockblocks.append( o_db )
@@ -244,10 +246,11 @@ class DocBlock:
 
     reDollar = re.compile(r'(\$)([\w]+)')
 
-    def __init__(self, begin, end, subject, contents, **kwargs):
+    def __init__(self, begin, end, subject, contents, lines, **kwargs):
 
         self.lineNoStart = begin
-        self.lienNoEnd = end
+        self.lineNoEnd = end
+        self.lines = lines
 
         self.rawSubject = subject
         self.rawContents = contents
@@ -269,7 +272,7 @@ class DocBlock:
         self.assets = {}
 
         def _finishToken(activeToken, activeTokenContent):
-            if activeToken not in self.tokens:
+            if activeToken not in self.tokens or not self.tokens[activeToken]:
                 self.tokens[activeToken] = []
             self.tokens[activeToken].append(activeTokenContent)
             self.tokenSequence.append(activeToken)
@@ -303,16 +306,18 @@ class DocBlock:
             self.name = mClass.group(1)
             return
 
-        mFunction = re.search(r'function\s((\w+)\s*\(.*\))', self.rawSubject, re.IGNORECASE)
+        mFunction = re.search(r'function\s((\w+)\s*\()', self.rawSubject, re.IGNORECASE)
         if mFunction:
             self.type = 'function'
-            self.subject = mFunction.group(1)
             self.name = mFunction.group(2)
+            self.subject, params = __class__._parseFunctionSignature(self.lineNoEnd[0], self.lines)
+            if ('param' not in self.tokens or not self.tokens['param']) and params:
+                self.tokens['param'] = params
             return
 
         mVariable = re.search(r'(\$[\w]+)\s*=\s*', self.rawSubject, re.IGNORECASE)
         if mVariable:
-            self.type = 'variable'
+            self.type = 'property'
             self.subject = mVariable.group(1)
             self.name = self.reDollar.sub(r'\2', mVariable.group(1))
             return
@@ -356,8 +361,9 @@ class DocBlock:
                 else:
                     continue
 
-            if db.type=='variable' and db.scope in self.assets['properties']:
+            if db.type=='property' and db.scope in self.assets['properties']:
                 self.assets['properties'][db.scope].append(db)
+
             db.parent = self
 
 
@@ -374,10 +380,9 @@ class DocBlock:
     def brief_name(self, options={}):
         
         return  (self.parent.name+('::' if self.language=='PHP' else '.') if self.parent and 'showParent' in options and options['showParent'] else '')+\
-                ('$' if self.language=='PHP' and self.type=='variable' else '')+\
+                ('$' if self.language=='PHP' and self.type=='property' else '')+\
                 self.name+\
                 ('()' if self.type=='function' else '')
-
 
     
     def href(self, options={}):
@@ -388,10 +393,7 @@ class DocBlock:
     def md(self, options={}):
 
         def lst2str(lst):
-            ret = ''
-            for line in lst:
-                ret += line+"\n"
-            return ret.strip()
+            return '\n'.join( [ str(item).strip() for item in lst ] )
 
         strMD = ''
         header = ''
@@ -407,9 +409,30 @@ class DocBlock:
 
         strMD += lst2str(self.tokens['description'])+"\n\n"
 
+        if self.type=='property':
+            contents = __class__._parseArray(self.lineNoEnd[0], self.lines)
+            strMD += '```'+self.language.lower()+'\n'+contents+'\n```\n\n' if contents else ''
+
+        if self.type=='function':
+            if 'param' in self.tokens and self.tokens['param']:
+                strMD += '__'+options['tags']['param']+'__'+": \n\n"
+                for param in self.tokens['param']:
+                    strMD += '* '
+                    strMD += "\t"
+                    m = self.reParam.search(param)
+                    if m:
+                        param = '__%s__ (%s)' % (m.group('name'), m.group('type'))+ ' - '+self.reParam.sub('', param).strip('- ')
+
+                    strMD += param.rstrip() + "\n"
+
+                strMD += "\n"
+
+            if 'return' in self.tokens:
+                strMD += '__'+options['tags']['return']+'__'+": "+lst2str(self.tokens['return'])+"\n\n"
+
         ts = set(self.tokenSequence)
         tags = ''
-        for tag in ts:
+        for tag in sorted(ts, key=lambda x: DocBlock2Web.options['tag_order'].index(x) if x in DocBlock2Web.options['tag_order'] else len(DocBlock2Web.options['tag_order'])):
             if tag not in ['param', 'return', 'example', 'description']:
                 if tag in options['tags'] and tag in self.tokens:
                     tags += '__'+options['tags'][tag]+'__'+": "+lst2str(self.tokens[tag])+"  \n"
@@ -421,24 +444,6 @@ class DocBlock:
         tags += '\n' if len(tags)>0 else ''
 
         strMD += tags
-
-        if self.type=='function':
-            if 'param' in self.tokens:
-                strMD += '__'+options['tags']['param']+'__'+": \n"
-                for param in self.tokens['param']:
-                    strMD += '* '
-                    m = self.reParam.search(param)
-                    if m:
-                        param = '__%s__ (%s)' % (m.group('name'), m.group('type'))+ ' - '+self.reParam.sub('', param).strip('- ')
-
-                    strMD += re.sub(r'\n', '\n\t', param)
-
-                    strMD += "\n"
-
-            if 'return' in self.tokens:
-                strMD += '__'+options['tags']['return']+'__'+": "+lst2str(self.tokens['return'])+"\n"
-
-
 
         if options['display']=='hierarchial' and self.type in DocBlock2Web.rootTypes and self.type!='file_header':
             for asset_type in options['asset_order']:
@@ -490,9 +495,105 @@ class DocBlock:
 
         return str_
     
+    @staticmethod
+    def _parseArray(lineNoEnd, lines):
+
+        arrayContent = ''
+        openBrackets = 0
+        closeBrackets = 0
+
+        first_line = lines[lineNoEnd+1] if lineNoEnd+1 < len(lines) else ''
+
+        if not (re.search(r'=\s*array\s*\(.*$', first_line) or re.search(r'=\s*\[.*$', first_line)):
+            return ''
+
+        # skip empty array
+        if re.search(r'=\s*array\s*\(\s*\)[\s;,]*$', first_line) or re.search(r'=\s*\[\s*\][\s;,]*$', first_line):
+            return ''
+
+        for line in lines[lineNoEnd+1:]:
+            arrayContent += line
+            openBrackets += len(re.findall(r'\[|\(', line))
+            closeBrackets += len(re.findall(r'\]|\)', line))
+            if openBrackets>0 and openBrackets==closeBrackets:
+                break
+
+        return arrayContent.strip()
+    
+    @staticmethod
+    def _parseFunctionSignature(lineNoEnd, lines):
+
+        maxsignaturelength = 55
+
+        full_signature = ''
+        openBrackets = 0
+        closeBrackets = 0
+
+        first_line = lines[lineNoEnd+1] if lineNoEnd+1 < len(lines) else ''
+
+        for line in lines[lineNoEnd+1:]:
+            full_signature += line
+            openBrackets += len(re.findall(r'\(', line))
+            closeBrackets += len(re.findall(r'\)', line))
+            if openBrackets>0 and openBrackets==closeBrackets:
+                break
+        
+        full_signature = re.sub(r'\s+', ' ', full_signature)
+        full_signature = full_signature.strip('{ ')
+        
+        mSignature = re.search(r'function\s+(?P<func_name>\w+)\s*(\((?P<params>.*)\))', full_signature)
+        params = re.split(r',\s*\$', mSignature.group('params').strip('$ \t'))
+        params = filter(lambda x: x.strip()!='', params)
+        params = list(map(lambda x: '$'+x, params))
+
+        if len(full_signature)>maxsignaturelength:
+            return mSignature.group('func_name') + '()', params
+        else:
+            return mSignature.group('func_name') + '(' + mSignature.group('params') + ')', params
+
+
+    
 class DocBlock2WebException(Exception):
     pass
 
+
+def jekyllfile(files):
+    
+    doc =   "---\n"+\
+            "layout: docs\n"+\
+            "title: \"Item and Action Tracing\"\n"+\
+            "sidebar_left:\n"+\
+            "  title: Class reference\n"+\
+            "  class: rsd-navbar-left\n"+\
+            "  id: \"rsd_navbar_left\"\n"+\
+            "  folders:\n"
+    
+    dbws = []
+    merged_categories = {}
+    md = ''
+    
+    for i, path in enumerate(files):
+        file = open(path)
+        dbw = DocBlock2Web(file)
+        doc += dbw.toc()
+        md += dbw.md()
+        dbws.append(dbw)
+        merged_categories = DocBlock2Web.merge_categories( merged_categories, dbw.categories )
+        
+        
+    doc += "sidebar_right:\n"+\
+            "  title: By category\n"+\
+            "  class: rsd-navbar-right\n"+\
+            "  id: \"rsd_navbar_right\"\n"+\
+            "  folders:\n"
+            
+    doc += dbws[0].cats(categories = merged_categories)
+        
+    doc += '---\n\n'    
+    
+    doc += md
+    
+    return doc
 
 
 
