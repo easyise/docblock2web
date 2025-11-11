@@ -126,7 +126,7 @@ class DocBlock2Web:
                raise DocBlock2WebException("DocBlock content line does not start with '*': %s" % \
                                             ("(file: %s:%d)" % (self.sourceFileName, lineNo+1) if self.sourceFileName else '') ) 
                 
-
+        
         # Collect class assets
         for i, db in enumerate(self.dockblocks):
             if i==0 and not db.type:

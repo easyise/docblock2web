@@ -171,7 +171,7 @@ class DocBlock:
         strMD += lst2str(self.tokens['description'])+"\n\n"
 
         if self.type=='property':
-            contents = __class__._parseArray(self.lineNoEnd[0], self.lines)
+            contents = self.__class__._parseArray(self.lineNoEnd[0], self.lines)
             strMD += '```'+self.language.lower()+'\n'+contents+'\n```\n\n' if contents else ''
 
         if self.type=='function':
@@ -290,7 +290,7 @@ class DocBlockPHP(DocBlock):
         if mFunction:
             self.type = 'function'
             self.name = mFunction.group(2)
-            self.subject, params = __class__._parseFunctionSignature(self.lineNoEnd[0], self.lines)
+            self.subject, params = self.__class__._parseFunctionSignature(self.lineNoEnd[0], self.lines)
             if ('param' not in self.tokens or not self.tokens['param']) and params:
                 self.tokens['param'] = params
             self.obj_prefix = 'fn'
@@ -320,11 +320,11 @@ class DocBlockPHP(DocBlock):
 
         first_line = lines[lineNoEnd+1] if lineNoEnd+1 < len(lines) else ''
 
-        if not (re.search(r'=\s*array\s*\(.*$', first_line) or re.search(r'=\s*\[.*$', first_line)):
+        if not (re.search(r'(?i)=\s*array\s*\(.*$', first_line) or re.search(r'=\s*\[.*$', first_line)):
             return ''
 
         # skip empty array
-        if re.search(r'=\s*array\s*\(\s*\)[\s;,]*$', first_line) or re.search(r'=\s*\[\s*\][\s;,]*$', first_line):
+        if re.search(r'(?i)=\s*array\s*\(\s*\)[\s;,]*$', first_line) or re.search(r'=\s*\[\s*\][\s;,]*$', first_line):
             return ''
 
         for line in lines[lineNoEnd+1:]:
